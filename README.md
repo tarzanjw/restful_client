@@ -1,4 +1,7 @@
-restful_client
+RESTful Client
 ==============
 
-Kit to call RESTful APIs, then do validate, convert to python class
+This package provides an easy, quickly, secure way to developers on using
+of RESTful APIs from client side.
+
+
