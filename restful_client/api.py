@@ -92,11 +92,29 @@ def _get_dict_merged_attr(name, default=None):
             factory = self._factory
             if not factory:
                 raise AttributeError
-            return getattr(factory, name)
-            return value_from_factory.update(local_value)
+            data = getattr(factory, name).copy()
+            data.update(local_value)
+            return data
         except AttributeError:
             pass
         return local_value
+    return getter
+
+def _get_list_appended_attr(name):
+    def getter(self):
+        private_name = "_" + name
+        try:
+            local_value = self.__getattribute__(private_name)
+        except AttributeError:
+            local_value = []
+        try:
+            factory = self._factory
+            if not factory:
+                raise AttributeError
+            value_from_factory = getattr(factory, name)
+        except AttributeError:
+            value_from_factory = []
+        return value_from_factory + local_value
     return getter
 
 def _get_overwrited_attr(name, default=None):
@@ -139,11 +157,19 @@ class Api(object):
                             _set_local_value('session_args'))
     response_cls = property(_get_overwrited_attr('response_cls'),
                             _set_local_value('response_cls'))
+    before_request_filters = \
+        property(_get_list_appended_attr('before_request_filters'),
+                 _set_local_value('before_request_filters'))
+    after_request_filters = \
+        property(_get_list_appended_attr('after_request_filters'),
+                 _set_local_value('after_request_filters'))
 
     def __init__(self, method, url,
                  response_cls=None,
                  force_json_response=True,
                  args=None,
+                 before_request_filters=None,
+                 after_request_filters=None,
                  **session_args):
         self.url = url
         if args is None:
@@ -153,6 +179,17 @@ class Api(object):
         self.force_json_response = force_json_response
         self.args = args
         self.session_args = session_args
+
+        if before_request_filters is None:
+            before_request_filters = []
+        elif not isinstance(before_request_filters, list):
+            before_request_filters = [before_request_filters, ]
+        if after_request_filters is None:
+            after_request_filters = []
+        elif not isinstance(after_request_filters, list):
+            after_request_filters = [after_request_filters, ]
+        self.before_request_filters = before_request_filters
+        self.after_request_filters = after_request_filters
 
     @staticmethod
     def _populate_arg_names_from_url(url):
@@ -168,12 +205,18 @@ class Api(object):
         return ar
 
     def _before_request(self, req):
-        # TODO fire before request here
-        pass
+        for fn in self.before_request_filters:
+            fn(req)
 
     def _after_request(self, req):
-        # TODO fire after request here
-        pass
+        for fn in self.after_request_filters:
+            fn(req)
+
+    def add_before_request_filter(self, filter):
+        self._before_request_filters.append(filter)
+
+    def add_after_request_filter(self, filter):
+        self._after_request_filters.append(filter)
 
     def _make_response(self, res):
         """
