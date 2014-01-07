@@ -4,9 +4,12 @@ import requests
 import urlparse
 from urllib import urlencode
 import re
+import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+CONTENT_TYPE_JSON = 'application/json'
 
 class URL(object):
     """
@@ -66,8 +69,13 @@ class ApiRequest(object):
         return self.method + "#" + str(self.url)
 
     def execute(self):
+        """
+        Execute the API
+        @rtype requests.Response
+        """
         logger.debug("Start executing API %s" % self)
-        return self.session.request(self.method, str(self.url), **self.session_args)
+        self.response = self.session.request(self.method, str(self.url), **self.session_args)
+        return self.response
 
 class Api(object):
     """
@@ -81,12 +89,16 @@ class Api(object):
     DELETE = "DELETE"
 
     def __init__(self, method, url,
+                 response_cls=None,
+                 force_json_response=True,
                  args=None,
                  **kwargs):
         self.url = url
         if args is None:
             args = Api._populate_arg_names_from_url(str(self.url))
         self.method = method
+        self.response_cls = response_cls
+        self.force_json_response = force_json_response
         self.args = args
 
     @staticmethod
@@ -102,6 +114,34 @@ class Api(object):
         ar = ApiRequest(self.method, url, data=data)
         return ar
 
+    def _before_request(self, req):
+        # TODO fire before request here
+        pass
+
+    def _after_request(self, req):
+        # TODO fire after request here
+        pass
+
+    def _make_response(self, res):
+        """
+        Make response as python object from RESTful response
+        @type res: requests.Response
+        """
+        if self.force_json_response:
+            content_type = CONTENT_TYPE_JSON
+        else:
+            content_type = res.headers.get('content-type', 'Unknown').lower()
+        if content_type == CONTENT_TYPE_JSON:
+            data = json.loads(res.text)
+        else:
+            assert False, 'Unsupport content type "%s"' % content_type
+        if self.response_cls is None:
+            return data
+        logger.debug('Start making "%s" response from data. Data: %s'
+                     % (self.response_cls.__name__, data))
+        res = self.response_cls.deserialize(data)
+        return res
+
     def __call__(self, *args, **kwargs):
         if self.method in (Api.POST, Api.PUT):
             assert len(args) > 0, "Args have to specify POST data"
@@ -114,7 +154,13 @@ class Api(object):
         bind_data.update(kwargs)
         req = self.create_api_request(bind_data, data)
         logger.debug("Going to call API %s" % req)
-        return req.execute()
+        logger.debug("Firing before request signal on %s" % req)
+        self._before_request(req)
+        req.execute()
+        logger.debug("Firing after request signal on %s" % req)
+        self._after_request(req)
+        logger.debug("API %s executed done" % req)
+        return self._make_response(req.response)
 
 class BaseApiFactory(object):
     pass

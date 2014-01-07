@@ -11,6 +11,7 @@ with open(os.path.join(here, 'CHANGES.md')) as f:
 
 install_requires = [
     "colander",
+    "limone",
     "requests >= 2.0"
 ]
 

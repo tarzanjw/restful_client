@@ -4,6 +4,19 @@ from unittest import TestCase
 from . import BaseApiFactory, Api, ApiRequest
 import requests
 import logging
+import colander
+import limone
+
+@limone.content_schema
+class FacebookPublicInfo(colander.MappingSchema):
+    id = colander.SchemaNode(colander.Integer())
+    first_name = colander.SchemaNode(colander.String())
+    last_name = colander.SchemaNode(colander.String())
+    link = colander.SchemaNode(colander.String())
+    username = colander.SchemaNode(colander.String())
+    gender = colander.SchemaNode(colander.String())
+    locale = colander.SchemaNode(colander.String())
+    not_exists = colander.SchemaNode(colander.String(), missing='afds')
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -25,8 +38,7 @@ class TestApiRequest(TestCase):
 class TestApi(TestCase):
     def test_request_get(self):
         url = "http://graph.facebook.com/{fbid}"
-        api = Api("GET", url)
+        api = Api("GET", url, response_cls=FacebookPublicInfo)
         self.assertListEqual(api.args, ['fbid',])
-        data = api("hocdt")
-        print data
-        assert False
+        fb = api("hocdt")
+        self.assertIsInstance(fb, FacebookPublicInfo)
