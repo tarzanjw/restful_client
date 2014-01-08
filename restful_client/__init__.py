@@ -1,5 +1,7 @@
 __author__ = 'tarzan'
 
+import itertools
+import inspect
 import requests
 import urlparse
 from urllib import urlencode
@@ -54,7 +56,7 @@ class ApiRequest(object):
     This package do a request to API Provider
     """
     def __init__(self, method, url, params=None,
-                 data=None, session=None, **session_args):
+                 data=None, session=None, api=None, **session_args):
         """
         @parm url: the API url can be string or URL
         @param session: The session to execute request, if None, it will be
@@ -79,6 +81,7 @@ class ApiRequest(object):
         session_args['params'] = self.url.params
         session_args['data'] = data
         self.session_args = session_args
+        self.api = api
 
     def __str__(self):
         return self.method + "#" + str(self.url)
@@ -103,7 +106,8 @@ class Api(object):
     DELETE = "DELETE"
 
     def __init__(self, method, url,
-                 response_cls=None,
+                 schema_cls=None,
+                 object_cls=None,
                  force_json_response=True,
                  args=None,
                  before_request_filters=None,
@@ -114,7 +118,20 @@ class Api(object):
         if args is None:
             args = _populate_arg_names_from_url(str(self.url))
         self.method = method
-        self.response_cls = response_cls
+        self.schema_cls = schema_cls
+        if self.schema_cls:
+            self._data_schema = self.schema_cls()
+            try:
+                # try formencode first
+                self.deserialize_data = self._data_schema.to_python
+            except AttributeError:
+                try:
+                    # then colander
+                    self.deserialize_data = self._data_schema.deserialize
+                except AttributeError:
+                    # just let it default (no deserialize)
+                    pass
+        self.object_cls = object_cls
         self.force_json_response = force_json_response
         self.args = args
         self.session_args = session_args
@@ -129,8 +146,9 @@ class Api(object):
             after_request_filters = [after_request_filters, ]
         self.before_request_filters = before_request_filters
         self.after_request_filters = after_request_filters
-        if okay_status_code is not None:
-            self.okay_status_code = okay_status_code
+        if okay_status_code is None:
+            okay_status_code = [200,]
+        self.okay_status_code = okay_status_code
 
     def join_url(self, url):
         try:
@@ -148,7 +166,8 @@ class Api(object):
         url = pattern.sub(lambda x: bind[x.group(1)], self.url)
         for aname in arg_names:
             del bind[aname]
-        ar = ApiRequest(self.method, url, params=bind, data=data, **self.session_args)
+        ar = ApiRequest(self.method, url, params=bind, data=data,
+                        api=self, **self.session_args)
         return ar
 
     def _before_request(self, req):
@@ -167,6 +186,9 @@ class Api(object):
     def add_after_request_filter(self, filter):
         self.after_request_filters.append(filter)
 
+    def deserialize_data(self, data):
+        return data
+
     def _make_response(self, res):
         """
         Make response as python object from RESTful response
@@ -180,11 +202,20 @@ class Api(object):
             data = json.loads(res.text)
         else:
             assert False, 'Unsupport content type "%s"' % content_type
-        if self.response_cls is None:
+        if self.schema_cls is None:
             return data
         logger.debug('Start making "%s" response from data. Data: %s'
-                     % (self.response_cls.__name__, data))
-        res = self.response_cls.deserialize(data)
+                     % (self.schema_cls.__name__, data))
+
+        data = self.deserialize_data(data)
+        if self.object_cls:
+            if isinstance(data, (list, tuple)):
+                res = [self.object_cls(**attrs) for attrs in data]
+            else:
+                res = self.object_cls(**data)
+        else:
+            res = data
+
         return res
 
     def __call__(self, *args, **kwargs):
@@ -206,3 +237,54 @@ class Api(object):
         if req.response.status_code not in self.okay_status_code:
             raise ApiFailed(req)
         return self._make_response(req.response)
+
+class _BaseObjectMeta(type):
+    def obj_create_attr_value(cls, ftype, value):
+        if isinstance(ftype, (list, tuple)):
+            assert isinstance(value, (list, tuple))
+            values = []
+            for _type, _value in itertools.izip(itertools.cycle(ftype), value):
+                values.append(cls.obj_create_attr_value(_type, _value))
+            return values
+        if isinstance(ftype, _BaseObjectMeta) and isinstance(value, dict):
+            return ftype(**value)
+        return ftype(value)
+
+    def obj_attr_getter(cls, name):
+        def getter(obj):
+            return obj.__object_attr_data__.get(name, None)
+        return getter
+
+    def obj_attr_setter(cls, name):
+        def setter(obj, value):
+            ftype = cls.__object_attr_types__[name]
+            value = cls.obj_create_attr_value(ftype, value)
+            obj.__object_attr_data__[name] = value
+            return value
+        return setter
+
+    def __new__(meta, cls_name, bases, new_attrs):
+        cls = type.__new__(meta, cls_name, bases, new_attrs)
+        cls.__object_attr_types__ = {}
+        for fname, ftype in new_attrs.iteritems():
+            if not inspect.isclass(ftype) or fname in cls.__ignored_attrs__:
+                continue
+            cls.__object_attr_types__[fname] = ftype
+            cls_property = property(cls.obj_attr_getter(fname),
+                                    cls.obj_attr_setter(fname))
+            setattr(cls, fname, cls_property)
+        return cls
+
+    def __call__(cls, **attrs):
+        cls.__object_attr_data__ = {}
+        return super(_BaseObjectMeta, cls).__call__(**attrs)
+
+
+class BaseObject(object):
+    __metaclass__ = _BaseObjectMeta
+
+    __ignored_attrs__ = set([])
+
+    def __init__(self, **attrs):
+        for fname, fvalue in attrs.iteritems():
+            self.__setattr__(fname, fvalue)
