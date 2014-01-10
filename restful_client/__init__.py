@@ -8,6 +8,7 @@ from urllib import urlencode
 import re
 import json
 import logging
+import limone
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +268,9 @@ class _BaseObjectMeta(type):
         cls = type.__new__(meta, cls_name, bases, new_attrs)
         cls.__object_attr_types__ = {}
         for fname, ftype in new_attrs.iteritems():
-            if not inspect.isclass(ftype) or fname in cls.__ignored_attrs__:
+            if not (inspect.isclass(ftype) or isinstance(ftype, (list, tuple)))\
+                or fname in cls.__ignored_attrs__\
+                or (fname.startswith('__') and fname.endswith('__')):
                 continue
             cls.__object_attr_types__[fname] = ftype
             cls_property = property(cls.obj_attr_getter(fname),
@@ -287,4 +290,4 @@ class BaseObject(object):
 
     def __init__(self, **attrs):
         for fname, fvalue in attrs.iteritems():
-            self.__setattr__(fname, fvalue)
+            setattr(self, fname, fvalue)
