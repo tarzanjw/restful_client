@@ -8,12 +8,25 @@ from urllib import urlencode
 import re
 import json
 import logging
-import limone
 
 logger = logging.getLogger(__name__)
 
+
+class RestFulException(BaseException):
+    def __init__(self, response, message, **kwargs):
+        self.response = response
+        self.message = message
+        logger.debug("JSON response could be decoded: %s" % self.response.text)
+        return super(RestFulException, self).__init__(message, **kwargs)
+
+    def __str__(self):
+        return "JSON response could be decoded (%d): %s" \
+               % (self.response.status_code, self.response.text)
+
+
 def _populate_arg_names_from_url(url):
     return [g.group(1) for g in re.finditer(r"\{([\w-]+)\}", url)]
+
 
 class ApiFailed(BaseException):
     """
@@ -29,6 +42,7 @@ class ApiFailed(BaseException):
 
 CONTENT_TYPE_JSON = 'application/json'
 
+
 class URL(object):
     """
     Represent URL as structured data type
@@ -40,8 +54,8 @@ class URL(object):
         if isinstance(params, dict):
             self.params = params
         else:
-            self.params = {k:v[0] if isinstance(v, (list, tuple)) and len(v) == 1 else v
-                           for k,v in urlparse.parse_qs(str(params)).items()}
+            self.params = {k: v[0] if isinstance(v, (list, tuple)) and len(v) == 1 else v
+                           for k, v in urlparse.parse_qs(str(params)).items()}
 
     @classmethod
     def parse(cls, url):
@@ -51,6 +65,7 @@ class URL(object):
     def __str__(self):
         return urlparse.urlunsplit((self.scheme, self.netloc,
                                    self.path, urlencode(self.params), None))
+
 
 class ApiRequest(object):
     """
@@ -69,7 +84,7 @@ class ApiRequest(object):
         @type url: URL
         """
         if params is None:
-            params= {}
+            params = {}
         if data is None:
             data = {}
         if session is None:
@@ -95,6 +110,7 @@ class ApiRequest(object):
         logger.debug("Start executing API %s" % self)
         self.response = self.session.request(self.method, str(self.url), **self.session_args)
         return self.response
+
 
 class Api(object):
     """
@@ -200,13 +216,16 @@ class Api(object):
         else:
             content_type = res.headers.get('content-type', 'Unknown').lower()
         if content_type == CONTENT_TYPE_JSON:
-            data = json.loads(res.text)
+            try:
+                data = json.loads(res.text)
+            except ValueError, e:
+                raise RestFulException(res, "JSON object could be decoded")
         else:
             assert False, 'Unsupport content type "%s"' % content_type
         if self.schema_cls is None:
             return data
         logger.debug('Start making "%s" response from data. Data: %s'
-                     % (self.schema_cls.__name__, data))
+                     % (self.schema_cls.__name__, res.text))
 
         data = self.deserialize_data(data)
         if self.object_cls:
@@ -238,6 +257,7 @@ class Api(object):
         if req.response.status_code not in self.okay_status_code:
             raise ApiFailed(req)
         return self._make_response(req.response)
+
 
 class _BaseObjectMeta(type):
     def obj_create_attr_value(cls, ftype, value):
