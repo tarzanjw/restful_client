@@ -32,6 +32,7 @@ class ApiFailed(BaseException):
     """
     Raised whenever an API returns an not okay status code
     """
+
     def __init__(self, req):
         self.request = req
         self.response = req.response
@@ -40,6 +41,7 @@ class ApiFailed(BaseException):
         return "API %s failed with status code %d" \
                % (self.request, self.response.status_code)
 
+
 CONTENT_TYPE_JSON = 'application/json'
 
 
@@ -47,6 +49,7 @@ class URL(object):
     """
     Represent URL as structured data type
     """
+
     def __init__(self, scheme="", netloc="", path="", params=""):
         self.scheme = scheme
         self.netloc = netloc
@@ -64,13 +67,14 @@ class URL(object):
 
     def __str__(self):
         return urlparse.urlunsplit((self.scheme, self.netloc,
-                                   self.path, urlencode(self.params), None))
+                                    self.path, urlencode(self.params), None))
 
 
 class ApiRequest(object):
     """
     This package do a request to API Provider
     """
+
     def __init__(self, method, url, params=None,
                  data=None, session=None, api=None, **session_args):
         """
@@ -170,7 +174,7 @@ class Api(object):
         self.before_request_filters = before_request_filters
         self.after_request_filters = after_request_filters
         if okay_status_code is None:
-            okay_status_code = [200,]
+            okay_status_code = [200, ]
         self.okay_status_code = okay_status_code
         self.default_params = default_params
         self.default_data = default_data
@@ -273,47 +277,19 @@ class Api(object):
 
 
 class _BaseObjectMeta(type):
-    def obj_create_attr_value(cls, ftype, value):
-        if isinstance(ftype, (list, tuple)):
-            assert isinstance(value, (list, tuple))
-            values = []
-            for _type, _value in itertools.izip(itertools.cycle(ftype), value):
-                values.append(cls.obj_create_attr_value(_type, _value))
-            return values
-        if isinstance(ftype, _BaseObjectMeta) and isinstance(value, dict):
-            return ftype(**value)
-        return ftype(value)
-
-    def obj_attr_getter(cls, name):
-        def getter(obj):
-            return obj.__object_attr_data__.get(name, None)
-        return getter
-
-    def obj_attr_setter(cls, name):
-        def setter(obj, value):
-            ftype = cls.__object_attr_types__[name]
-            value = cls.obj_create_attr_value(ftype, value)
-            obj.__object_attr_data__[name] = value
-            return value
-        return setter
-
     def __new__(meta, cls_name, bases, new_attrs):
         cls = type.__new__(meta, cls_name, bases, new_attrs)
         cls.__object_attr_types__ = {}
         for fname, ftype in new_attrs.iteritems():
-            if not (inspect.isclass(ftype) or isinstance(ftype, (list, tuple)))\
-                or fname in cls.__ignored_attrs__\
+            if not (inspect.isclass(ftype) or isinstance(ftype, (list, tuple))) \
+                or fname in cls.__ignored_attrs__ \
                 or (fname.startswith('__') and fname.endswith('__')):
                 continue
             cls.__object_attr_types__[fname] = ftype
-            cls_property = property(cls.obj_attr_getter(fname),
-                                    cls.obj_attr_setter(fname))
-            setattr(cls, fname, cls_property)
+            # cls_property = property(cls.obj_attr_getter(fname),
+            #                         cls.obj_attr_setter(fname))
+            # setattr(cls, fname, cls_property)
         return cls
-
-    def __call__(cls, **attrs):
-        cls.__object_attr_data__ = {}
-        return super(_BaseObjectMeta, cls).__call__(**attrs)
 
 
 class BaseObject(object):
@@ -323,7 +299,29 @@ class BaseObject(object):
 
     __schema_names_mapping__ = {}
 
+    __object_attr_types__ = {}
+
+    def _create_attr_value(self, ftype, value):
+        if isinstance(ftype, (list, tuple)):
+            assert isinstance(value, (list, tuple))
+            values = []
+            for _type, _value in itertools.izip(itertools.cycle(ftype), value):
+                values.append(self._create_attr_value(_type, _value))
+            return values
+        if issubclass(ftype, BaseObject) and isinstance(value, dict):
+            return ftype(**value)
+        return ftype(value)
+
+    def __setattr__(self, name, value):
+        if name not in self.__class__.__object_attr_types__:
+            return super(BaseObject, self).__setattr__(name, value)
+        ftype = self.__object_attr_types__[name]
+        value = self._create_attr_value(ftype, value)
+        self.__dict__[name] = value
+        return value
+
     def __init__(self, **attrs):
+        self.__object_attr_data__ = {}
         for fname, fvalue in attrs.iteritems():
             fname = self.__schema_names_mapping__.get(fname, fname)
             setattr(self, fname, fvalue)
