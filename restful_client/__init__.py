@@ -133,9 +133,9 @@ class Api(object):
                  after_request_filters=None,
                  okay_status_code=None,
                  **session_args):
-        if default_params:
+        if default_params is None:
             default_params = {}
-        if default_data:
+        if default_data is None:
             default_data = {}
         self.url = self.join_url(url)
         if args is None:
@@ -191,9 +191,11 @@ class Api(object):
         url = pattern.sub(lambda x: bind[x.group(1)], self.url)
         for aname in arg_names:
             del bind[aname]
-        bind = self.default_params.copy().update(bind)
-        data = self.default_data.copy().update(data)
-        ar = ApiRequest(self.method, url, params=bind, data=data,
+        api_params = self.default_params.copy()
+        api_params.update(bind)
+        api_data = self.default_data.copy()
+        api_data.update(data)
+        ar = ApiRequest(self.method, url, params=api_params, data=api_data,
                         api=self, **self.session_args)
         return ar
 
@@ -251,9 +253,10 @@ class Api(object):
     def __call__(self, *args, **kwargs):
         if self.method in (Api.POST, Api.PUT):
             assert len(args) > 0, "Args have to specify POST data"
-            data = args.pop(0)
+            data = args[0]
+            args = args[1:]
         else:
-            data = None
+            data = {}
         assert len(args) <= len(self.args), \
             "Args has to have <= %d elments" % len(self.args)
         bind_data = dict(zip(self.args[:len(args)], args))
@@ -318,6 +321,9 @@ class BaseObject(object):
 
     __ignored_attrs__ = set([])
 
+    __schema_names_mapping__ = {}
+
     def __init__(self, **attrs):
         for fname, fvalue in attrs.iteritems():
+            fname = self.__schema_names_mapping__.get(fname, fname)
             setattr(self, fname, fvalue)
