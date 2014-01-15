@@ -12,12 +12,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class RestFulException(BaseException):
+class RestFulError(ValueError):
     def __init__(self, response, message, **kwargs):
         self.response = response
         self.message = message
         logger.debug("JSON response could be decoded: %s" % self.response.text)
-        return super(RestFulException, self).__init__(message, **kwargs)
+        return super(RestFulError, self).__init__(message, **kwargs)
 
     def __str__(self):
         return "JSON response could be decoded (%d): %s" \
@@ -127,10 +127,16 @@ class Api(object):
                  object_cls=None,
                  force_json_response=True,
                  args=None,
+                 default_params=None,
+                 default_data=None,
                  before_request_filters=None,
                  after_request_filters=None,
                  okay_status_code=None,
                  **session_args):
+        if default_params:
+            default_params = {}
+        if default_data:
+            default_data = {}
         self.url = self.join_url(url)
         if args is None:
             args = _populate_arg_names_from_url(str(self.url))
@@ -166,6 +172,8 @@ class Api(object):
         if okay_status_code is None:
             okay_status_code = [200,]
         self.okay_status_code = okay_status_code
+        self.default_params = default_params
+        self.default_data = default_data
 
     def join_url(self, url):
         try:
@@ -183,6 +191,8 @@ class Api(object):
         url = pattern.sub(lambda x: bind[x.group(1)], self.url)
         for aname in arg_names:
             del bind[aname]
+        bind = self.default_params.copy().update(bind)
+        data = self.default_data.copy().update(data)
         ar = ApiRequest(self.method, url, params=bind, data=data,
                         api=self, **self.session_args)
         return ar
@@ -219,7 +229,7 @@ class Api(object):
             try:
                 data = json.loads(res.text)
             except ValueError, e:
-                raise RestFulException(res, "JSON object could be decoded")
+                raise RestFulError(res, "JSON object could be decoded")
         else:
             assert False, 'Unsupport content type "%s"' % content_type
         if self.schema_cls is None:
